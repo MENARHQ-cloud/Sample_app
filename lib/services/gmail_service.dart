@@ -80,6 +80,36 @@ class GmailService {
     }
   }
 
+  /// Ensures the IMAP connection is active, reconnects if needed
+  Future<bool> ensureConnected() async {
+    try {
+      if (_imapClient != null && _imapClient!.isLoggedIn) {
+        // Try a simple operation to verify connection is alive
+        try {
+          await _imapClient!.noop();
+          return true;
+        } catch (e) {
+          print('Connection check failed, reconnecting: $e');
+        }
+      }
+
+      // Need to reconnect
+      if (_email != null && _appPassword != null) {
+        print('Reconnecting to IMAP...');
+        _imapClient = ImapClient(isLogEnabled: false);
+        await _imapClient!.connectToServer('imap.gmail.com', 993, isSecure: true);
+        await _imapClient!.login(_email!, _appPassword!);
+        print('Reconnected successfully');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      print('Reconnection failed: $e');
+      return false;
+    }
+  }
+
   Future<void> disconnect() async {
     try {
       if (_imapClient != null && _imapClient!.isConnected) {
@@ -175,26 +205,45 @@ class GmailService {
   }
 
   Future<EmailMessage?> getLatestEmailFromSender(String senderEmail) async {
-    if (_imapClient == null || !_imapClient!.isLoggedIn) {
-      throw Exception('Not authenticated');
+    // Ensure we have an active connection
+    final connected = await ensureConnected();
+    if (!connected) {
+      throw Exception('Not authenticated - please login again');
     }
 
     try {
+      print('Fetching latest email from: $senderEmail');
+      
       await _imapClient!.selectInbox();
 
       // Search for emails from sender with "statement" in subject
-      final searchResult = await _imapClient!.searchMessages(
+      // Try exact email match first
+      print('Searching for emails from: $senderEmail');
+      var searchResult = await _imapClient!.searchMessages(
         searchCriteria: 'FROM "$senderEmail" SUBJECT "statement"',
       );
 
+      // If no results, try a broader search with just the domain part
       if (searchResult.matchingSequence == null || 
           searchResult.matchingSequence!.isEmpty) {
+        print('No exact match, trying broader search...');
+        // Try with just the email address without quotes
+        searchResult = await _imapClient!.searchMessages(
+          searchCriteria: 'FROM $senderEmail SUBJECT statement',
+        );
+      }
+
+      if (searchResult.matchingSequence == null || 
+          searchResult.matchingSequence!.isEmpty) {
+        print('No emails found from $senderEmail with statement subject');
         return null;
       }
 
       // Get the latest message (last in sequence)
       final sequence = searchResult.matchingSequence!;
       final sequenceIds = sequence.toList();
+      print('Found ${sequenceIds.length} emails, fetching latest (ID: ${sequenceIds.last})');
+      
       final latestId = sequenceIds.last;
       final latestSequence = MessageSequence.fromId(latestId);
 
@@ -204,13 +253,18 @@ class GmailService {
         '(ENVELOPE BODY[] BODYSTRUCTURE)',
       );
 
-      if (messages.messages.isEmpty) return null;
+      if (messages.messages.isEmpty) {
+        print('Failed to fetch message content');
+        return null;
+      }
 
       final message = messages.messages.first;
+      print('Fetched email: ${message.decodeSubject()}');
       
       // Extract attachments
       final attachments = <AttachmentInfo>[];
       _extractPdfAttachments(message.body, attachments, '');
+      print('Found ${attachments.length} PDF attachment(s)');
 
       return EmailMessage(
         subject: message.decodeSubject() ?? 'No Subject',
@@ -222,7 +276,7 @@ class GmailService {
         sequenceId: latestId,
       );
     } catch (e) {
-      print('Error fetching email: $e');
+      print('Error fetching email from $senderEmail: $e');
       rethrow;
     }
   }
@@ -327,8 +381,10 @@ class GmailService {
     String senderEmail, {
     Set<int>? excludeIds,
   }) async {
-    if (_imapClient == null || !_imapClient!.isLoggedIn) {
-      throw Exception('Not authenticated');
+    // Ensure we have an active connection
+    final connected = await ensureConnected();
+    if (!connected) {
+      throw Exception('Not authenticated - please login again');
     }
 
     try {
