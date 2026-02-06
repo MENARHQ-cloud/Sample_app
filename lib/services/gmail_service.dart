@@ -320,4 +320,100 @@ class GmailService {
     
     return null;
   }
+
+  /// Get all emails from a specific sender within the last 2 years
+  /// [excludeIds] - Set of sequence IDs to exclude (already extracted)
+  Future<List<EmailMessage>> getAllEmailsFromSender(
+    String senderEmail, {
+    Set<int>? excludeIds,
+  }) async {
+    if (_imapClient == null || !_imapClient!.isLoggedIn) {
+      throw Exception('Not authenticated');
+    }
+
+    try {
+      await _imapClient!.selectInbox();
+
+      // Calculate date 2 years ago
+      final twoYearsAgo = DateTime.now().subtract(const Duration(days: 730));
+      final dateStr = '${twoYearsAgo.day}-${_monthName(twoYearsAgo.month)}-${twoYearsAgo.year}';
+
+      // Search for emails from sender with "statement" in subject since 2 years ago
+      final searchResult = await _imapClient!.searchMessages(
+        searchCriteria: 'FROM "$senderEmail" SUBJECT "statement" SINCE $dateStr',
+      );
+
+      if (searchResult.matchingSequence == null || 
+          searchResult.matchingSequence!.isEmpty) {
+        return [];
+      }
+
+      final sequence = searchResult.matchingSequence!;
+      final allIds = sequence.toList();
+      
+      // Filter out already extracted IDs
+      final idsToFetch = excludeIds != null 
+          ? allIds.where((id) => !excludeIds.contains(id)).toList()
+          : allIds;
+
+      if (idsToFetch.isEmpty) {
+        return [];
+      }
+
+      final emails = <EmailMessage>[];
+
+      // Fetch emails in batches of 10 to avoid timeout
+      for (int i = 0; i < idsToFetch.length; i += 10) {
+        final batchEnd = (i + 10 < idsToFetch.length) ? i + 10 : idsToFetch.length;
+        final batchIds = idsToFetch.sublist(i, batchEnd);
+        
+        for (final msgId in batchIds) {
+          try {
+            final msgSequence = MessageSequence.fromId(msgId);
+            final messages = await _imapClient!.fetchMessages(
+              msgSequence,
+              '(ENVELOPE BODY[] BODYSTRUCTURE)',
+            );
+
+            if (messages.messages.isNotEmpty) {
+              final message = messages.messages.first;
+              
+              // Check if it has PDF attachments
+              final attachments = <AttachmentInfo>[];
+              _extractPdfAttachments(message.body, attachments, '');
+              
+              if (attachments.isNotEmpty) {
+                emails.add(EmailMessage(
+                  subject: message.decodeSubject() ?? 'No Subject',
+                  from: message.from?.first.email ?? 'Unknown',
+                  fromName: message.from?.first.personalName ?? '',
+                  date: message.decodeDate() ?? DateTime.now(),
+                  body: message.decodeTextHtmlPart() ?? message.decodeTextPlainPart() ?? '',
+                  attachments: attachments,
+                  sequenceId: msgId,
+                ));
+              }
+            }
+          } catch (e) {
+            print('Error fetching message $msgId: $e');
+            // Continue with next message
+          }
+        }
+      }
+
+      // Sort by date descending (newest first)
+      emails.sort((a, b) => b.date.compareTo(a.date));
+      
+      return emails;
+    } catch (e) {
+      print('Error fetching all emails: $e');
+      rethrow;
+    }
+  }
+
+  String _monthName(int month) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return months[month - 1];
+  }
 }

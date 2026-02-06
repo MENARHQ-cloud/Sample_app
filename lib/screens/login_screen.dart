@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/gmail_service.dart';
+import '../services/password_storage_service.dart';
 import 'senders_list_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,6 +15,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   final _emailController = TextEditingController();
   final _appPasswordController = TextEditingController();
   final _gmailService = GmailService();
+  final _passwordStorage = PasswordStorageService();
   
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -66,12 +68,18 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       );
 
       if (success) {
+        // Initialize password storage
+        await _passwordStorage.init();
+        
         if (mounted) {
           Navigator.pushReplacement(
             context,
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
-                  SendersListScreen(gmailService: _gmailService),
+                  SendersListScreen(
+                    gmailService: _gmailService,
+                    passwordStorage: _passwordStorage,
+                  ),
               transitionsBuilder: (context, animation, secondaryAnimation, child) {
                 return FadeTransition(opacity: animation, child: child);
               },
