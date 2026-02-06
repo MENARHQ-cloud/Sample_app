@@ -5,7 +5,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
+import 'dart:typed_data';
 import '../services/gmail_service.dart';
+import 'pdf_data_screen.dart';
 
 class EmailDetailScreen extends StatefulWidget {
   final GmailService gmailService;
@@ -27,6 +29,7 @@ class _EmailDetailScreenState extends State<EmailDetailScreen>
   bool _isLoading = true;
   bool _isDownloading = false;
   String? _errorMessage;
+  final Map<String, Uint8List> _pdfDataCache = {};
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -134,6 +137,184 @@ class _EmailDetailScreenState extends State<EmailDetailScreen>
         setState(() => _isDownloading = false);
       }
     }
+  }
+
+  Future<void> _extractPdfData(AttachmentInfo attachment) async {
+    // Show password dialog
+    final password = await _showPasswordDialog(attachment.filename);
+    if (password == null) return; // User cancelled
+
+    setState(() => _isDownloading = true);
+
+    try {
+      // Check cache first
+      Uint8List? data = _pdfDataCache[attachment.filename];
+      
+      if (data == null) {
+        // Download the PDF
+        data = await widget.gmailService.downloadAttachment(
+          _email!,
+          attachment,
+        );
+        
+        if (data != null) {
+          _pdfDataCache[attachment.filename] = data;
+        }
+      }
+
+      if (data != null && mounted) {
+        // Navigate to PDF data screen
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PdfDataScreen(
+              pdfData: data!,
+              filename: attachment.filename,
+              password: password.isEmpty ? null : password,
+            ),
+          ),
+        );
+      } else {
+        throw Exception('Failed to download PDF');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade900,
+            behavior: SnackBarBehavior.floating,
+            content: Text('Failed: ${e.toString()}'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDownloading = false);
+      }
+    }
+  }
+
+  Future<String?> _showPasswordDialog(String filename) async {
+    final TextEditingController passwordController = TextEditingController();
+    bool obscurePassword = true;
+    
+    return showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A2E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.lock_outline_rounded,
+                  color: Color(0xFF6366F1),
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'PDF Password',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Enter password for:',
+                style: TextStyle(color: Colors.grey[400], fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                filename,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF252542),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TextField(
+                  controller: passwordController,
+                  obscureText: obscurePassword,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Password (leave empty if none)',
+                    hintStyle: TextStyle(color: Colors.grey[600]),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_off_rounded
+                            : Icons.visibility_rounded,
+                        color: Colors.grey[500],
+                      ),
+                      onPressed: () {
+                        setDialogState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Leave empty if PDF is not password protected',
+                style: TextStyle(color: Colors.grey[600], fontSize: 11),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: Colors.grey[400]),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, passwordController.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6366F1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text('Extract Data'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -636,13 +817,34 @@ class _EmailDetailScreenState extends State<EmailDetailScreen>
             ),
           ),
           const SizedBox(width: 8),
+          // Extract Data button
+          OutlinedButton(
+            onPressed: _isDownloading 
+                ? null 
+                : () => _extractPdfData(attachment),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF10B981),
+              side: const BorderSide(color: Color(0xFF10B981)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.text_snippet_outlined, size: 16),
+                SizedBox(width: 4),
+                Text('Extract', style: TextStyle(fontSize: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          // Save button
           ElevatedButton(
             onPressed: _isDownloading 
                 ? null 
                 : () => _downloadAttachment(attachment),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6366F1),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             ),
             child: _isDownloading
                 ? const SizedBox(
@@ -656,9 +858,9 @@ class _EmailDetailScreenState extends State<EmailDetailScreen>
                 : const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.download_rounded, size: 18),
+                      Icon(Icons.download_rounded, size: 16),
                       SizedBox(width: 4),
-                      Text('Save'),
+                      Text('Save', style: TextStyle(fontSize: 12)),
                     ],
                   ),
           ),
