@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/gmail_service.dart';
 import 'email_detail_screen.dart';
+import 'batch_process_screen.dart';
 import 'login_screen.dart';
 
 class SendersListScreen extends StatefulWidget {
@@ -17,6 +18,8 @@ class _SendersListScreenState extends State<SendersListScreen>
   List<SenderInfo> _senders = [];
   bool _isLoading = true;
   String? _errorMessage;
+  bool _isSelectionMode = false;
+  final Set<String> _selectedSenders = {};
   
   late AnimationController _animationController;
 
@@ -68,6 +71,68 @@ class _SendersListScreenState extends State<SendersListScreen>
     }
   }
 
+  void _toggleSelectionMode() {
+    setState(() {
+      _isSelectionMode = !_isSelectionMode;
+      if (!_isSelectionMode) {
+        _selectedSenders.clear();
+      }
+    });
+  }
+
+  void _toggleSenderSelection(String email) {
+    setState(() {
+      if (_selectedSenders.contains(email)) {
+        _selectedSenders.remove(email);
+      } else {
+        _selectedSenders.add(email);
+      }
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      if (_selectedSenders.length == _senders.length) {
+        _selectedSenders.clear();
+      } else {
+        _selectedSenders.addAll(_senders.map((s) => s.email));
+      }
+    });
+  }
+
+  void _startBatchProcessing() {
+    if (_selectedSenders.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1A1A2E),
+          behavior: SnackBarBehavior.floating,
+          content: const Text('Please select at least one sender'),
+        ),
+      );
+      return;
+    }
+
+    final selectedSendersList = _senders
+        .where((s) => _selectedSenders.contains(s.email))
+        .toList();
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BatchProcessScreen(
+          gmailService: widget.gmailService,
+          selectedSenders: selectedSendersList,
+        ),
+      ),
+    ).then((_) {
+      // Reset selection mode when coming back
+      setState(() {
+        _isSelectionMode = false;
+        _selectedSenders.clear();
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -87,62 +152,201 @@ class _SendersListScreenState extends State<SendersListScreen>
           child: Column(
             children: [
               // App Bar
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF6366F1).withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.people_outline_rounded,
-                        color: Color(0xFF6366F1),
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Statement Senders',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '${_senders.length} sender${_senders.length != 1 ? 's' : ''} with PDF statements',
-                            style: TextStyle(
-                              color: Colors.grey[400],
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
-                      onPressed: _isLoading ? null : _loadSenders,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.logout_rounded, color: Colors.white70),
-                      onPressed: _logout,
-                    ),
-                  ],
-                ),
-              ),
+              _buildAppBar(),
+              
+              // Selection bar when in selection mode
+              if (_isSelectionMode && _senders.isNotEmpty)
+                _buildSelectionBar(),
               
               // Content
               Expanded(
                 child: _buildContent(),
               ),
+              
+              // Bottom action bar when selections exist
+              if (_isSelectionMode && _selectedSenders.isNotEmpty)
+                _buildBottomActionBar(),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppBar() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              _isSelectionMode ? Icons.checklist_rounded : Icons.people_outline_rounded,
+              color: const Color(0xFF6366F1),
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isSelectionMode ? 'Select Senders' : 'Statement Senders',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  _isSelectionMode
+                      ? '${_selectedSenders.length} of ${_senders.length} selected'
+                      : '${_senders.length} sender${_senders.length != 1 ? 's' : ''} with PDF statements',
+                  style: TextStyle(
+                    color: Colors.grey[400],
+                    fontSize: 13,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (!_isLoading && _senders.isNotEmpty) ...[
+            IconButton(
+              icon: Icon(
+                _isSelectionMode ? Icons.close_rounded : Icons.checklist_rounded,
+                color: _isSelectionMode ? Colors.white : Colors.white70,
+              ),
+              onPressed: _toggleSelectionMode,
+              tooltip: _isSelectionMode ? 'Cancel' : 'Multi-select',
+            ),
+          ],
+          if (!_isSelectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white70),
+              onPressed: _isLoading ? null : _loadSenders,
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout_rounded, color: Colors.white70),
+              onPressed: _logout,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectionBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF3D3D5C).withOpacity(0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _selectAll,
+            child: Row(
+              children: [
+                Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: _selectedSenders.length == _senders.length
+                        ? const Color(0xFF6366F1)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: _selectedSenders.length == _senders.length
+                          ? const Color(0xFF6366F1)
+                          : Colors.grey[600]!,
+                      width: 2,
+                    ),
+                  ),
+                  child: _selectedSenders.length == _senders.length
+                      ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  _selectedSenders.length == _senders.length ? 'Deselect All' : 'Select All',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '${_selectedSenders.length} selected',
+              style: const TextStyle(
+                color: Color(0xFF6366F1),
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomActionBar() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        border: Border(
+          top: BorderSide(
+            color: const Color(0xFF3D3D5C).withOpacity(0.5),
+          ),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _startBatchProcessing,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF10B981),
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.play_arrow_rounded),
+                const SizedBox(width: 8),
+                Text(
+                  'Process ${_selectedSenders.length} Sender${_selectedSenders.length > 1 ? 's' : ''}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -276,14 +480,35 @@ class _SendersListScreenState extends State<SendersListScreen>
       onRefresh: _loadSenders,
       color: const Color(0xFF6366F1),
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: EdgeInsets.fromLTRB(
+          16, 
+          _isSelectionMode ? 12 : 8, 
+          16, 
+          _isSelectionMode && _selectedSenders.isNotEmpty ? 100 : 8,
+        ),
         itemCount: _senders.length,
         itemBuilder: (context, index) {
           final sender = _senders[index];
+          final isSelected = _selectedSenders.contains(sender.email);
+          
           return _SenderCard(
             sender: sender,
             index: index,
-            onTap: () => _navigateToEmailDetail(sender),
+            isSelectionMode: _isSelectionMode,
+            isSelected: isSelected,
+            onTap: () {
+              if (_isSelectionMode) {
+                _toggleSenderSelection(sender.email);
+              } else {
+                _navigateToEmailDetail(sender);
+              }
+            },
+            onLongPress: () {
+              if (!_isSelectionMode) {
+                _toggleSelectionMode();
+                _toggleSenderSelection(sender.email);
+              }
+            },
           );
         },
       ),
@@ -320,12 +545,18 @@ class _SendersListScreenState extends State<SendersListScreen>
 class _SenderCard extends StatelessWidget {
   final SenderInfo sender;
   final int index;
+  final bool isSelectionMode;
+  final bool isSelected;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const _SenderCard({
     required this.sender,
     required this.index,
+    required this.isSelectionMode,
+    required this.isSelected,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -353,14 +584,21 @@ class _SenderCard extends StatelessWidget {
           color: Colors.transparent,
           child: InkWell(
             onTap: onTap,
+            onLongPress: onLongPress,
             borderRadius: BorderRadius.circular(16),
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A1A2E),
+                color: isSelected 
+                    ? const Color(0xFF6366F1).withOpacity(0.15)
+                    : const Color(0xFF1A1A2E),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: const Color(0xFF3D3D5C).withOpacity(0.5),
+                  color: isSelected 
+                      ? const Color(0xFF6366F1)
+                      : const Color(0xFF3D3D5C).withOpacity(0.5),
+                  width: isSelected ? 2 : 1,
                 ),
                 boxShadow: [
                   BoxShadow(
@@ -372,6 +610,31 @@ class _SenderCard extends StatelessWidget {
               ),
               child: Row(
                 children: [
+                  // Checkbox or Avatar
+                  if (isSelectionMode) ...[
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: isSelected 
+                            ? const Color(0xFF6366F1)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isSelected 
+                              ? const Color(0xFF6366F1)
+                              : Colors.grey[600]!,
+                          width: 2,
+                        ),
+                      ),
+                      child: isSelected 
+                          ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  
                   // Avatar
                   Container(
                     width: 50,
@@ -457,11 +720,13 @@ class _SenderCard extends StatelessWidget {
                     ),
                   ),
                   
-                  const SizedBox(width: 8),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.white38,
-                  ),
+                  if (!isSelectionMode) ...[
+                    const SizedBox(width: 8),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: Colors.white38,
+                    ),
+                  ],
                 ],
               ),
             ),
