@@ -217,7 +217,7 @@ class GmailService {
         from: message.from?.first.email ?? 'Unknown',
         fromName: message.from?.first.personalName ?? '',
         date: message.decodeDate() ?? DateTime.now(),
-        body: message.decodeTextPlainPart() ?? message.decodeTextHtmlPart() ?? '',
+        body: message.decodeTextHtmlPart() ?? message.decodeTextPlainPart() ?? '',
         attachments: attachments,
         sequenceId: latestId,
       );

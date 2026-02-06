@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:open_file/open_file.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_html/flutter_html.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../services/gmail_service.dart';
 
@@ -520,16 +522,60 @@ class _EmailDetailScreenState extends State<EmailDetailScreen>
                   const SizedBox(height: 16),
                   const Divider(color: Color(0xFF3D3D5C), height: 1),
                   const SizedBox(height: 16),
-                  Text(
-                    _email!.body.isNotEmpty 
-                        ? _email!.body 
-                        : 'No text content available',
-                    style: TextStyle(
-                      color: Colors.grey[300],
-                      fontSize: 14,
-                      height: 1.6,
-                    ),
-                  ),
+                  _email!.body.isNotEmpty 
+                      ? Html(
+                          data: _email!.body,
+                          style: {
+                            "body": Style(
+                              color: Colors.grey[300],
+                              fontSize: FontSize(14),
+                              lineHeight: LineHeight(1.6),
+                              margin: Margins.zero,
+                              padding: HtmlPaddings.zero,
+                            ),
+                            "a": Style(
+                              color: const Color(0xFF6366F1),
+                              textDecoration: TextDecoration.underline,
+                            ),
+                            "p": Style(
+                              margin: Margins.only(bottom: 12),
+                            ),
+                            "h1, h2, h3, h4, h5, h6": Style(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            "table": Style(
+                              border: Border.all(color: const Color(0xFF3D3D5C)),
+                            ),
+                            "td, th": Style(
+                              padding: HtmlPaddings.all(8),
+                              border: Border.all(color: const Color(0xFF3D3D5C)),
+                            ),
+                            "th": Style(
+                              backgroundColor: const Color(0xFF252542),
+                              fontWeight: FontWeight.bold,
+                            ),
+                            "img": Style(
+                              width: Width(100, Unit.percent),
+                            ),
+                          },
+                          onLinkTap: (url, _, __) async {
+                            if (url != null) {
+                              final uri = Uri.parse(url);
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            }
+                          },
+                        )
+                      : Text(
+                          'No text content available',
+                          style: TextStyle(
+                            color: Colors.grey[300],
+                            fontSize: 14,
+                            height: 1.6,
+                          ),
+                        ),
                 ],
               ),
             ),
